@@ -1,0 +1,10 @@
+
+Faker
+reportlab
+Pillow
+qrcode
+pdfplumber
+pytesseract
+pdf2image
+streamlit
+Flask
