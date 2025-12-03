@@ -1,28 +1,14 @@
-#!/usr/bin/env python3
-"""
-generate_pdfs.py
-Génère automatiquement des PDFs réalistes pour les catégories :
-- facture
-- devis
-- contrat
-- fiche_paie
-- documents_rh
-- notes_frais
-
-Usage:
-    python generate_pdfs.py --out dataset --count 50
-"""
-
+from reportlab.lib.utils import ImageReader
 import os
 import random
 from datetime import datetime, timedelta
 from faker import Faker
 from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
-from reportlab.platypus import Table, TableStyle, Paragraph
+from reportlab.platypus import Paragraph, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 from PIL import Image, ImageDraw, ImageFont
 import io
 
@@ -62,7 +48,14 @@ def make_logo(initials, size=(200, 60)):
         font = ImageFont.truetype("DejaVuSans-Bold.ttf", 36)
     except:
         font = ImageFont.load_default()
-    w, h = draw.textsize(initials, font=font)
+
+    try:
+        w, h = draw.textsize(initials, font=font)
+    except AttributeError:
+        bbox = draw.textbbox((0, 0), initials, font=font)
+        w = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
+
     draw.text(((size[0] - w) / 2, (size[1] - h) / 2), initials, fill="white", font=font)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -70,54 +63,40 @@ def make_logo(initials, size=(200, 60)):
     return buf
 
 
-def save_pdf(filepath, draw_fn):
-    c = canvas.Canvas(filepath, pagesize=A4)
-    w, h = A4
-    draw_fn(c, w, h)
-    c.showPage()
-    c.save()
-
-
-# --- Fonctions de génération par catégorie ---
-
-
 def generate_invoice(path):
+    print(f"Création de la facture: {path}")
     company = fake.company()
-    company_addr = fake.address().replace("\n", ", ")
     client = fake.name()
-    client_addr = fake.address().replace("\n", ", ")
     invoice_no = f"F-{random.randint(1000,9999)}"
     date = random_date()
     due = date + timedelta(days=30)
+
     items = [
         (
             fake.sentence(nb_words=random.randint(3, 7)),
             random.randint(1, 5),
             round(random.uniform(20, 1200), 2),
         )
-        for _ in range(random.randint(2, 6))
+        for _ in range(3)
     ]
-    total = round(sum(q * p for (_, q, p) in items), 2)
+    total = sum(q * p for _, q, p in items)
     logo_buf = make_logo("".join([w[0] for w in company.split()][:2]))
+    logo_image = ImageReader(logo_buf)  # <-- conversion BytesIO -> ImageReader
 
     def draw(c, w, h):
         c.drawImage(
-            logo_buf, 20 * mm, h - 30 * mm, width=50 * mm, height=15 * mm, mask="auto"
+            logo_image, 20 * mm, h - 30 * mm, width=50 * mm, height=15 * mm, mask="auto"
         )
         c.setFont("Helvetica-Bold", 16)
-        c.drawString(20 * mm, h - 40 * mm, company)
-        c.setFont("Helvetica", 9)
-        c.drawString(20 * mm, h - 46 * mm, company_addr)
-        c.drawString(120 * mm, h - 30 * mm, f"Facture: {invoice_no}")
-        c.drawString(120 * mm, h - 36 * mm, f"Date: {date.strftime('%d/%m/%Y')}")
-        c.drawString(120 * mm, h - 42 * mm, f"Échéance: {due.strftime('%d/%m/%Y')}")
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(20 * mm, h - 60 * mm, "Facturer à :")
+        c.drawString(20 * mm, h - 40 * mm, f"Facture {invoice_no}")
         c.setFont("Helvetica", 10)
-        c.drawString(20 * mm, h - 66 * mm, client)
-        c.drawString(20 * mm, h - 72 * mm, client_addr)
+        c.drawString(20 * mm, h - 60 * mm, f"Société: {company}")
+        c.drawString(20 * mm, h - 70 * mm, f"Client: {client}")
+        c.drawString(120 * mm, h - 60 * mm, f"Date: {date.strftime('%d/%m/%Y')}")
+        c.drawString(120 * mm, h - 66 * mm, f"Échéance: {due.strftime('%d/%m/%Y')}")
+
         data = (
-            [["Description", "Qté", "Prix Unitaire", "Total"]]
+            [["Description", "Qté", "Prix U", "Total"]]
             + [
                 [desc, str(qty), f"{price:.2f}", f"{qty*price:.2f}"]
                 for desc, qty, price in items
@@ -138,25 +117,36 @@ def generate_invoice(path):
         )
         table.wrapOn(c, 20 * mm, h - 140 * mm)
         table.drawOn(c, 20 * mm, h - 140 * mm)
+
+        styles = getSampleStyleSheet()
+        para = Paragraph(fake.paragraph(nb_sentences=5), styles["BodyText"])
+        para.wrapOn(c, 170 * mm, 100 * mm)
+        para.drawOn(c, 20 * mm, h - 250 * mm)
+
         c.setFont("Helvetica-Oblique", 8)
         c.drawString(20 * mm, 30 * mm, "Merci pour votre confiance.")
 
-    save_pdf(path, draw)
-
-
-# --- Devis, Contrat, Fiche de paie, Documents RH, Notes de frais ---
-# Fonctions similaires à generate_invoice, adaptées à chaque catégorie
-# Pour simplifier ici, on réutilise la fonction invoice mais tu peux créer des variantes plus détaillées
+    c = canvas.Canvas(path, pagesize=A4)
+    w, h = A4
+    draw(c, w, h)
+    c.showPage()
+    c.save()
 
 
 def generate_generic_pdf(path, title):
     def draw(c, w, h):
         c.setFont("Helvetica-Bold", 16)
         c.drawString(20 * mm, h - 40 * mm, title)
-        c.setFont("Helvetica", 10)
-        c.drawString(20 * mm, h - 60 * mm, fake.paragraph())
+        styles = getSampleStyleSheet()
+        para = Paragraph(fake.paragraph(nb_sentences=7), styles["BodyText"])
+        para.wrapOn(c, 170 * mm, 200 * mm)
+        para.drawOn(c, 20 * mm, h - 100 * mm)
 
-    save_pdf(path, draw)
+    c = canvas.Canvas(path, pagesize=A4)
+    w, h = A4
+    draw(c, w, h)
+    c.showPage()
+    c.save()
 
 
 GEN_FN = {
@@ -169,7 +159,6 @@ GEN_FN = {
 }
 
 
-# --- Main ---
 def main(output_dir, count):
     ensure_dirs(output_dir)
     for cat in CATEGORIES:
@@ -181,7 +170,7 @@ def main(output_dir, count):
                 GEN_FN[cat](path)
             except Exception as e:
                 print(f"Erreur lors de la génération {path}: {e}")
-    print(f"✅ Génération terminée dans: {output_dir}")
+    print(f"Génération terminée dans: {output_dir}")
 
 
 if __name__ == "__main__":
